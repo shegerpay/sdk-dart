@@ -1,3 +1,5 @@
+<p align="center"><img src="logo.png" alt="ShegerPay" width="200" /></p>
+
 # ShegerPay Dart/Flutter SDK
 
 Official Dart/Flutter SDK for ShegerPay — Ethiopian payment verification.
