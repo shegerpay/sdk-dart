@@ -1,0 +1,9 @@
+name: shegerpay
+version: 2.2.0
+description: Official Dart/Flutter SDK for ShegerPay — Ethiopian payment verification
+homepage: https://shegerpay.com
+repository: https://github.com/shegerpay/sdk-dart
+
+environment:
+  sdk: '>=2.17.0 <4.0.0'
+  flutter: '>=3.0.0'
