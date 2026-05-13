@@ -193,6 +193,7 @@ class ShegerPay {
     String? description,
     bool enableCbe = true,
     bool enableTelebirr = true,
+    Map<String, dynamic> extra = const {},
   }) async {
     final body = {
       'title': title,
@@ -200,6 +201,7 @@ class ShegerPay {
       'currency': currency,
       'enable_cbe': enableCbe,
       'enable_telebirr': enableTelebirr,
+      ...extra,
     };
     
     if (description != null) {
@@ -239,6 +241,93 @@ class ShegerPay {
     return links.map((l) => PaymentLink.fromJson(l)).toList();
   }
 
+  /// Get source-of-truth payment-link order status.
+  Future<Map<String, dynamic>> getPaymentLinkOrderStatus(String shortCode, String orderId) {
+    return _request('GET', '/api/v1/payment-links/$shortCode/orders/$orderId/status', {});
+  }
+
+  // ---------- Promo Codes ----------
+
+  Future<Map<String, dynamic>> createPromoCode(Map<String, dynamic> params) {
+    return _requestJson('POST', '/api/v1/promo-codes/', _promoPayload(params));
+  }
+
+  Future<Map<String, dynamic>> listPromoCodes() {
+    return _request('GET', '/api/v1/promo-codes/', {});
+  }
+
+  Future<Map<String, dynamic>> updatePromoCode(String codeId, Map<String, dynamic> params) {
+    return _requestJson('PATCH', '/api/v1/promo-codes/$codeId', _promoPayload(params));
+  }
+
+  Future<Map<String, dynamic>> validatePromoCode({
+    required String code,
+    required double amount,
+    String? linkId,
+    String? provider,
+    String? customerIdentifier,
+  }) {
+    return _requestJson('POST', '/api/v1/promo-codes/validate', {
+      'code': code,
+      'amount': amount,
+      if (linkId != null) 'link_id': linkId,
+      if (provider != null) 'provider': provider,
+      if (customerIdentifier != null) 'customer_identifier': customerIdentifier,
+    });
+  }
+
+  Future<Map<String, dynamic>> redeemPromoCode({
+    required String code,
+    required double amount,
+    required String transactionId,
+    String? provider,
+    String? orderId,
+    String? customerIdentifier,
+  }) {
+    return _requestJson('POST', '/api/v1/promo-codes/redeem', {
+      'code': code,
+      'amount': amount,
+      'transaction_id': transactionId,
+      if (provider != null) 'provider': provider,
+      if (orderId != null) 'order_id': orderId,
+      if (customerIdentifier != null) 'customer_identifier': customerIdentifier,
+    });
+  }
+
+  Future<Map<String, dynamic>> applyPaymentLinkCoupon({
+    required String shortCode,
+    required String code,
+    double? amount,
+    int quantity = 1,
+    String? provider,
+    String? customerIdentifier,
+  }) {
+    return _requestJson('POST', '/api/v1/payment-links/$shortCode/apply-coupon', {
+      'code': code,
+      'quantity': quantity,
+      if (amount != null) 'amount': amount,
+      if (provider != null) 'provider': provider,
+      if (customerIdentifier != null) 'customer_identifier': customerIdentifier,
+    });
+  }
+
+  Map<String, dynamic> _promoPayload(Map<String, dynamic> params) {
+    return {
+      if (params['code'] != null) 'code': params['code'],
+      'discount_type': params['discount_type'] ?? 'percent',
+      if (params['discount_value'] != null || params['discount_percent'] != null)
+        'discount_value': params['discount_value'] ?? params['discount_percent'],
+      if (params['discount_percent'] != null) 'discount_percent': params['discount_percent'],
+      if (params['max_discount_amount'] != null) 'max_discount_amount': params['max_discount_amount'],
+      if (params['min_order_amount'] != null) 'min_order_amount': params['min_order_amount'],
+      if (params['max_uses'] != null) 'max_uses': params['max_uses'],
+      if (params['max_uses_per_customer'] != null) 'max_uses_per_customer': params['max_uses_per_customer'],
+      if (params['expires_at'] != null) 'expires_at': params['expires_at'],
+      if (params['applies_to_link_ids'] != null) 'applies_to_link_ids': params['applies_to_link_ids'],
+      if (params['allowed_providers'] != null) 'allowed_providers': params['allowed_providers'],
+    };
+  }
+
   // ---------- Private Methods ----------
 
   Future<Map<String, dynamic>> _request(
@@ -270,11 +359,11 @@ class ShegerPay {
   ) async {
     final url = Uri.parse('$baseUrl$path');
     
-    final response = await _client.post(
-      url,
-      headers: {..._headers(), 'Content-Type': 'application/json'},
-      body: jsonEncode(body),
-    );
+    final headers = {..._headers(), 'Content-Type': 'application/json'};
+    final encoded = jsonEncode(body);
+    final response = method == 'PATCH'
+        ? await _client.patch(url, headers: headers, body: encoded)
+        : await _client.post(url, headers: headers, body: encoded);
 
     return _handleResponse(response);
   }
@@ -313,5 +402,21 @@ class ShegerPay {
     final digest = hmac.convert(bytes);
     final expected = 'sha256=$digest';
     return expected == signature;
+  }
+
+  /// Verify signed payment-link redirect parameters.
+  static bool verifyRedirectSignature(Map<String, dynamic> params, String signature, String secret) {
+    final amount = (num.tryParse('${params['amount'] ?? 0}') ?? 0).toStringAsFixed(2);
+    final payload = [
+      params['checkout_session_id'] ?? params['checkoutSessionId'] ?? '',
+      params['order_id'] ?? params['orderId'] ?? '',
+      params['short_code'] ?? params['shortCode'] ?? '',
+      amount,
+      params['currency'] ?? 'ETB',
+      params['status'] ?? 'paid',
+    ].join('|');
+    final hmac = Hmac(sha256, utf8.encode(secret));
+    final expected = hmac.convert(utf8.encode(payload)).toString();
+    return expected == signature.replaceFirst('sha256=', '');
   }
 }
