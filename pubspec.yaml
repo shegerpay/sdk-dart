@@ -3,6 +3,12 @@ description: Official Dart/Flutter SDK for the ShegerPay Payment Verification Ga
 version: 2.2.1
 homepage: https://shegerpay.com
 repository: https://github.com/shegerpay/sdk-dart
+issue_tracker: https://github.com/shegerpay/sdk-dart/issues
+topics:
+  - payments
+  - ethiopia
+  - verification
+  - fintech
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
