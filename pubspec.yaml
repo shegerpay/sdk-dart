@@ -2,6 +2,7 @@ name: shegerpay
 description: Official Dart/Flutter SDK for the ShegerPay Payment Verification Gateway.
 version: 2.2.1
 homepage: https://shegerpay.com
+repository: https://github.com/shegerpay/sdk-dart
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
