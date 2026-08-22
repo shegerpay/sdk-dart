@@ -1,4 +1,4 @@
-/// ShegerPay Dart/Flutter SDK v2.2.0
+/// ShegerPay Dart/Flutter SDK v2.2.1
 /// Official Dart SDK for ShegerPay Payment Verification Gateway
 ///
 /// Usage:
@@ -8,7 +8,6 @@
 library shegerpay;
 
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:crypto/crypto.dart';
 
@@ -212,21 +211,35 @@ class ShegerPay {
     return PaymentLink.fromJson(response);
   }
 
-  /// Verify payment from a receipt image (base64 encoded string or URL)
+  /// Verify a payment from a receipt image/screenshot (or PDF).
+  ///
+  /// Works for ANY supported bank — the backend reads the receipt's QR code
+  /// (CBE, Telebirr, BOA…) or OCRs the reference and auto-detects the provider.
+  /// Just pass the image bytes; no need to know the bank or pre-extract the ref.
   Future<VerificationResult> verifyImage(
-    String image, {
+    List<int> screenshot, {
     String? provider,
     double? amount,
-    String merchantName = 'ShegerPay Verification',
+    String? transactionId,
+    String? merchantName,
+    String? senderAccount,
   }) async {
-    final body = <String, dynamic>{
-      'image': image,
-      'merchant_name': merchantName,
-      if (provider != null) 'provider': provider,
-      if (amount != null) 'amount': amount,
-    };
-    final data = await _requestJson('POST', '/api/v1/verify/image', body);
-    return VerificationResult.fromJson(data);
+    final url = Uri.parse('$baseUrl/api/v1/verify-image');
+    final req = http.MultipartRequest('POST', url);
+    req.headers['X-API-Key'] = apiKey;
+    req.headers['User-Agent'] = 'ShegerPay-Dart-SDK/2.2.1';
+    if (provider != null) req.fields['provider'] = provider;
+    if (amount != null) req.fields['amount'] = amount.toString();
+    if (transactionId != null) req.fields['transaction_id'] = transactionId;
+    if (merchantName != null) req.fields['merchant_name'] = merchantName;
+    if (senderAccount != null) req.fields['sender_account'] = senderAccount;
+    req.files.add(
+      http.MultipartFile.fromBytes('screenshot', screenshot, filename: 'receipt.png'),
+    );
+
+    final streamed = await _client.send(req);
+    final response = await http.Response.fromStream(streamed);
+    return VerificationResult.fromJson(_handleResponse(response));
   }
 
   /// Get list of supported payment providers and their status
@@ -336,17 +349,24 @@ class ShegerPay {
     Map<String, String> params,
   ) async {
     final url = Uri.parse('$baseUrl$path');
-    
+
     late http.Response response;
-    
-    if (method == 'POST') {
-      response = await _client.post(
-        url,
-        headers: _headers(),
-        body: params,
-      );
-    } else {
-      response = await _client.get(url, headers: _headers());
+
+    switch (method) {
+      case 'POST':
+        response = await _client.post(url, headers: _headers(), body: params);
+        break;
+      case 'PATCH':
+        response = await _client.patch(url, headers: _headers(), body: params);
+        break;
+      case 'DELETE':
+        response = await _client.delete(url, headers: _headers());
+        break;
+      case 'GET':
+        response = await _client.get(url, headers: _headers());
+        break;
+      default:
+        throw ArgumentError('Unsupported HTTP method: $method');
     }
 
     return _handleResponse(response);
@@ -371,7 +391,7 @@ class ShegerPay {
   Map<String, String> _headers() => {
     'X-API-Key': apiKey,
     'Content-Type': 'application/x-www-form-urlencoded',
-    'User-Agent': 'ShegerPay-Dart-SDK/1.0',
+    'User-Agent': 'ShegerPay-Dart-SDK/2.2.1',
   };
 
   Map<String, dynamic> _handleResponse(http.Response response) {
@@ -405,18 +425,28 @@ class ShegerPay {
   }
 
   /// Verify signed payment-link redirect parameters.
+  ///
+  /// MUST match the backend signer exactly:
+  ///   status|short_code|transaction_id|amount_paid|currency
+  /// amount_paid is taken verbatim from the redirect query param (the backend
+  /// signs the same string it appends) — do NOT reformat it.
   static bool verifyRedirectSignature(Map<String, dynamic> params, String signature, String secret) {
-    final amount = (num.tryParse('${params['amount'] ?? 0}') ?? 0).toStringAsFixed(2);
+    if (signature.isEmpty || secret.isEmpty) return false;
     final payload = [
-      params['checkout_session_id'] ?? params['checkoutSessionId'] ?? '',
-      params['order_id'] ?? params['orderId'] ?? '',
+      params['status'] ?? '',
       params['short_code'] ?? params['shortCode'] ?? '',
-      amount,
-      params['currency'] ?? 'ETB',
-      params['status'] ?? 'paid',
+      params['transaction_id'] ?? params['transactionId'] ?? '',
+      '${params['amount_paid'] ?? params['amountPaid'] ?? ''}',
+      params['currency'] ?? '',
     ].join('|');
     final hmac = Hmac(sha256, utf8.encode(secret));
     final expected = hmac.convert(utf8.encode(payload)).toString();
-    return expected == signature.replaceFirst('sha256=', '');
+    final provided = signature.startsWith('sha256=') ? signature.substring(7) : signature;
+    if (expected.length != provided.length) return false;
+    var diff = 0;
+    for (var i = 0; i < expected.length; i++) {
+      diff |= expected.codeUnitAt(i) ^ provided.codeUnitAt(i);
+    }
+    return diff == 0;
   }
 }
